@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>விருட்சம்</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        .card { background-color: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); padding: 20px; }
+        .btn-primary { background-color: #4f46e5; color: white; transition: background-color 0.15s; }
+        .btn-primary:hover { background-color: #4338ca; }
+        .story-card { transition: transform 0.1s; }
+        .story-card:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+
+<div class="min-h-screen p-4 sm:p-8">
+    <header class="text-center mb-8">
+        <h1 class="text-4xl font-bold text-gray-800">விருட்சம்</h1>
+        <p id="user-info" class="text-sm text-gray-500 mt-2">இணைக்கிறது...</p>
+        <div class="mt-4 flex justify-center space-x-4">
+            <button onclick="toggleViewMode('private')" id="btn-private" class="px-4 py-2 text-sm font-medium rounded-lg btn-primary">எனது தனிப்பட்ட கதைகள்</button>
+            <button onclick="toggleViewMode('public')" id="btn-public" class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300">பொது கதைகள்</button>
+        </div>
+    </header>
+
+    <!-- Main View Container -->
+    <div id="view-container" class="max-w-4xl mx-auto space-y-8">
+
+        <!-- New/Edit Story Form -->
+        <div id="new-story-form" class="card hidden">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">புதிய கதை</h2>
+            <input type="hidden" id="story-id">
+            
+            <!-- Author Name Field -->
+            <input type="text" id="author-name" placeholder="ஆசிரியர் பெயர்" class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:ring-indigo-500 focus:border-indigo-500">
+
+            <input type="text" id="story-title" placeholder="கதை தலைப்பு" class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:ring-indigo-500 focus:border-indigo-500">
+            <textarea id="story-content" placeholder="உங்கள் கதையை இங்கே எழுதுங்கள்..." rows="8" class="w-full p-3 border border-gray-300 rounded-lg mb-3 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+            
+            <div class="flex items-center mb-4">
+                <input type="checkbox" id="story-published" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                <label for="story-published" class="ml-2 block text-sm text-gray-900">பொது ஊட்டத்திற்கு வெளியிடவும்</label>
+            </div>
+            
+            <button onclick="saveStory()" class="w-full btn-primary py-3 rounded-lg font-semibold" id="save-story-btn">கதையை சேமிக்கவும்</button>
+            <button onclick="toggleViewMode('private')" class="w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-lg font-semibold">ரத்துசெய்</button>
+        </div>
+
+        <!-- Private Stories View -->
+        <div id="private-stories-view" class="space-y-4">
+            <div class="flex justify-between items-center">
+                <h2 class="text-2xl font-semibold text-gray-800">எனது கதைகள்</h2>
+                <button onclick="showNewStoryForm()" class="btn-primary px-4 py-2 text-sm rounded-lg flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
+                    புதிய கதை
+                </button>
+            </div>
+            <div id="private-stories-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Private stories will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Public Stories View -->
+        <div id="public-stories-view" class="space-y-4 hidden">
+            <h2 class="text-2xl font-semibold text-gray-800">பொது ஊட்டம்</h2>
+            <div id="public-stories-list" class="grid grid-cols-1 gap-6">
+                <!-- Public stories will be rendered here -->
+                <p id="public-loading-message" class="text-gray-500 italic">பொது கதைகள் ஏற்றப்படுகிறது...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot, collection, query, where, serverTimestamp, setLogLevel, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- GLOBAL VARIABLES (MANDATORY CANVAS VARIABLES) ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-story-app';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    let db;
+    let auth;
+    let currentUserId = null;
+
+    setLogLevel('debug'); // Enable Firestore logging
+
+    // Utility function to get collection path based on privacy
+    function getStoriesCollectionPath(appId, privacy, userId = null) {
+        if (privacy === 'private' && userId) {
+            // Private path: /artifacts/{appId}/users/{userId}/stories
+            return `/artifacts/${appId}/users/${userId}/stories`;
+        } else if (privacy === 'public') {
+            // Public path: /artifacts/${appId}/public/data/stories
+            return `/artifacts/${appId}/public/data/stories`;
+        }
+        console.error('Invalid collection path request.');
+        return null;
+    }
+
+    // --- INITIALIZATION AND AUTHENTICATION ---
+    async function initializeFirebase() {
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // Authenticate user
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                    document.getElementById('user-info').textContent = `பயனர் அடையாள எண்: ${currentUserId}`;
+                    // Start listening to data once authenticated
+                    setupListeners();
+                } else {
+                    document.getElementById('user-info').textContent = 'இணைப்பு இல்லை (Anon)';
+                }
+            });
+
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+            document.getElementById('user-info').textContent = 'இணைப்பு பிழை';
+        }
+    }
+
+    // --- VIEW MANAGEMENT ---
+    window.toggleViewMode = function(mode) {
+        const privateView = document.getElementById('private-stories-view');
+        const publicView = document.getElementById('public-stories-view');
+        const newForm = document.getElementById('new-story-form');
+        const btnPrivate = document.getElementById('btn-private');
+        const btnPublic = document.getElementById('btn-public');
+        const viewContainer = document.getElementById('view-container'); 
+
+        // Reset all views
+        privateView.classList.add('hidden');
+        publicView.classList.add('hidden');
+        newForm.classList.add('hidden');
+
+        // Reset button styles
+        [btnPrivate, btnPublic].forEach(btn => {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+        });
+
+        // Set active view and button style
+        if (mode === 'private') {
+            privateView.classList.remove('hidden');
+            btnPrivate.classList.add('btn-primary');
+            btnPrivate.classList.remove('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+        } else if (mode === 'public') {
+            publicView.classList.remove('hidden');
+            btnPublic.classList.add('btn-primary');
+            btnPublic.classList.remove('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+        } else if (mode === 'new') {
+            newForm.classList.remove('hidden');
+        }
+
+        // Fix: Check if the element exists before trying to scroll.
+        if (viewContainer) {
+            viewContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            console.warn("View container element not found for scrolling.");
+        }
+    }
+
+    window.showNewStoryForm = function() {
+        // Sample Story Content (Professional Tamil)
+        const sampleTitle = "காலத்தின் கண்ணி";
+        const sampleContent = "ஊட்டி மலைப்பாதையின் அமைதியான திருப்பத்தில், ஒரு பழைய மரப்பெட்டி கண்டெடுக்கப்பட்டது. அதன் உள்ளே, தூசி படிந்த, ஆனால் விலைமதிப்பற்ற கையெழுத்துப் பிரதிகள் இருந்தன. இந்த ஏடுகள், நூற்றாண்டுகளுக்கு முன்னர் தொலைந்துபோன ஒரு ராஜாவால் எழுதப்பட்டவை. அவை மறைந்திருக்கும் ஒரு பழங்கால இரகசியத்தை வெளிப்படுத்தின, இது நகரத்தின் எதிர்காலத்தை மாற்றும் வல்லமை கொண்டது.";
+
+        // Clear or populate form fields
+        document.getElementById('story-id').value = '';
+        document.getElementById('story-title').value = sampleTitle;
+        document.getElementById('story-content').value = sampleContent;
+        document.getElementById('story-published').checked = false;
+        
+        // Set Default Author Name
+        document.getElementById('author-name').value = 'Vignesh'; 
+        
+        document.getElementById('save-story-btn').textContent = 'கதையை சேமிக்கவும்';
+        toggleViewMode('new');
+    }
+
+    // --- DATA HANDLING ---
+    window.saveStory = async function() {
+        if (!currentUserId) return console.error('பயனர் அங்கீகரிக்கப்படவில்லை.');
+
+        const storyId = document.getElementById('story-id').value || doc(collection(db, 'placeholder')).id;
+        const authorName = document.getElementById('author-name').value.trim() || 'Unknown Author';
+        const title = document.getElementById('story-title').value.trim();
+        const content = document.getElementById('story-content').value.trim();
+        const isPublished = document.getElementById('story-published').checked;
+        
+        if (!title || !content) {
+            console.error('தலைப்பு மற்றும் உள்ளடக்கம் தேவை.');
+            return;
+        }
+
+        const storyData = {
+            authorName: authorName, // New field for author name
+            title: title,
+            content: content,
+            userId: currentUserId,
+            isPublished: isPublished,
+            createdAt: serverTimestamp(),
+        };
+
+        try {
+            // 1. Save to Private Collection
+            const privatePath = getStoriesCollectionPath(appId, 'private', currentUserId);
+            const privateDocRef = doc(db, privatePath, storyId);
+            await setDoc(privateDocRef, storyData, { merge: true });
+
+            // 2. Conditionally save to Public Collection
+            const publicPath = getStoriesCollectionPath(appId, 'public');
+            const publicDocRef = doc(db, publicPath, storyId);
+
+            if (isPublished) {
+                await setDoc(publicDocRef, storyData, { merge: true });
+            } 
+            
+            console.log("Story saved successfully:", storyId);
+            toggleViewMode('private'); // Switch back to private view
+        } catch (e) {
+            console.error("Error saving story: ", e);
+        }
+    }
+    
+    // --- LISTENER SETUP ---
+    function setupListeners() {
+        if (!db || !currentUserId) return;
+        
+        // 1. Private Stories Listener
+        const privatePath = getStoriesCollectionPath(appId, 'private', currentUserId);
+        const privateCollection = collection(db, privatePath);
+        const qPrivate = query(privateCollection); 
+
+        onSnapshot(qPrivate, (querySnapshot) => {
+            let stories = [];
+            querySnapshot.forEach((doc) => {
+                stories.push({ id: doc.id, ...doc.data() });
+            });
+            
+            // Sort client-side by createdAt descending
+            stories.sort((a, b) => {
+                const timeA = a.createdAt instanceof Timestamp ? a.createdAt.toDate().getTime() : 0;
+                const timeB = b.createdAt instanceof Timestamp ? b.createdAt.toDate().getTime() : 0;
+                return timeB - timeA;
+            });
+
+            renderStories(stories, 'private-stories-list');
+        });
+
+        // 2. Public Stories Listener (Index Error Fix: client-side sort)
+        const publicPath = getStoriesCollectionPath(appId, 'public');
+        const publicCollection = collection(db, publicPath);
+        const qPublic = query(publicCollection, where('isPublished', '==', true)); 
+
+        onSnapshot(qPublic, (querySnapshot) => {
+            document.getElementById('public-loading-message').classList.add('hidden');
+            let stories = [];
+            querySnapshot.forEach((doc) => {
+                stories.push({ id: doc.id, ...doc.data() });
+            });
+
+            // Implement client-side sorting: Sort by createdAt descending
+            stories.sort((a, b) => {
+                const timeA = a.createdAt instanceof Timestamp ? a.createdAt.toDate().getTime() : 0;
+                const timeB = b.createdAt instanceof Timestamp ? b.createdAt.toDate().getTime() : 0;
+                return timeB - timeA;
+            });
+
+            renderStories(stories, 'public-stories-list', true);
+        }, (error) => {
+            console.error("Public Listener Error:", error);
+            document.getElementById('public-loading-message').textContent = 'பொது கதைகள் ஏற்றும்போது பிழை ஏற்பட்டது.';
+            document.getElementById('public-loading-message').classList.remove('hidden');
+        });
+    }
+
+    // --- RENDERING ---
+    function renderStories(stories, listId, isPublic = false) {
+        const listElement = document.getElementById(listId);
+        listElement.innerHTML = ''; // Clear existing content
+
+        if (stories.length === 0) {
+            listElement.innerHTML = `<p class="text-gray-500 italic p-4 col-span-full">கதைகள் எதுவும் இல்லை. ${isPublic ? 'முதலில் ஒரு கதையை வெளியிடவும்!' : 'புதிய கதை எழுதத் தொடங்குங்கள்!'}</p>`;
+            return;
+        }
+
+        stories.forEach(story => {
+            const card = document.createElement('div');
+            card.className = 'story-card card bg-white p-5 border-l-4 border-indigo-400';
+            
+            const timestamp = story.createdAt instanceof Timestamp 
+                ? story.createdAt.toDate().toLocaleDateString('ta-IN') // Using Tamil locale for date
+                : 'சேமிக்கப்படுகிறது...';
+
+            const author = story.authorName || 'தெரியாத ஆசிரியர்'; // Display author name
+
+            let buttonsHtml = '';
+            if (!isPublic) {
+                // Private view shows edit button
+                const escapedContent = story.content.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                const escapedTitle = story.title.replace(/'/g, "\\'").replace(/"/g, '\\"');
+                const escapedAuthor = author.replace(/'/g, "\\'").replace(/"/g, '\\"');
+
+                buttonsHtml = `
+                    <div class="mt-4 flex space-x-2">
+                        <button onclick="editStory('${story.id}', '${escapedTitle}', '${escapedContent}', ${story.isPublished}, '${escapedAuthor}')" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">திருத்து</button>
+                    </div>
+                `;
+            } else {
+                // Public view shows author
+                buttonsHtml = `<p class="text-sm text-gray-500 mt-2">ஆசிரியர்: ${author} (ID: ${story.userId.substring(0, 8)}...)</p>`;
+            }
+
+
+            card.innerHTML = `
+                <h3 class="text-xl font-semibold text-gray-800">${story.title}</h3>
+                <p class="text-sm text-gray-500 mb-3">உருவாக்கியது: ${timestamp} ${story.isPublished ? '<span class="text-green-500 ml-2"> (வெளியிடப்பட்டது)</span>' : ''}</p>
+                <p class="text-gray-600 line-clamp-3">${story.content}</p>
+                ${buttonsHtml}
+            `;
+            listElement.appendChild(card);
+        });
+    }
+
+    // Helper to populate form for editing
+    window.editStory = function(id, title, content, isPublished, authorName) {
+        document.getElementById('story-id').value = id;
+        document.getElementById('story-title').value = title;
+        document.getElementById('story-content').value = content;
+        document.getElementById('story-published').checked = isPublished;
+        document.getElementById('author-name').value = authorName; // Load existing author name
+        
+        document.getElementById('save-story-btn').textContent = 'கதையை புதுப்பிக்கவும்';
+        toggleViewMode('new');
+    }
+
+    // Start the application
+    initializeFirebase();
+
+</script>
+
+</body>
+</html>
